@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 48% 5%;
+    --foreground: 213 69% 97%;
+    --card: 220 45% 9%;
+    --card-foreground: 213 69% 97%;
+    --popover: 220 45% 9%;
+    --popover-foreground: 213 69% 97%;
+    --primary: 191 100% 68%;
+    --primary-foreground: 205 73% 6%;
+    --secondary: 216 44% 13%;
+    --secondary-foreground: 213 69% 97%;
+    --muted: 216 44% 13%;
+    --muted-foreground: 216 21% 64%;
+    --accent: 216 44% 13%;
+    --accent-foreground: 213 69% 97%;
+    --destructive: 355 100% 71%;
+    --destructive-foreground: 355 70% 6%;
+    --border: 215 33% 21%;
+    --input: 215 33% 21%;
+    --ring: 191 100% 68%;
+    --radius: 10px;
+  }
+  * { @apply border-border; }
+  html { color-scheme: dark; }
+  body { @apply bg-space text-ink antialiased; font-feature-settings: 'ss01'; }
+  a { @apply text-cyan transition-colors hover:text-ink; }
+  :focus-visible { @apply outline outline-2 outline-offset-2 outline-cyan rounded-md; }
+  input[type='range'] { accent-color: #5DE1FF; }
+}
+
+@layer utilities {
+  .label { @apply font-mono text-[11px] font-medium uppercase leading-none tracking-label text-ink-muted; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+  .bg-grid {
+    background-color: #080D17;
+    background-image: linear-gradient(#111A29 1px, transparent 1px), linear-gradient(90deg, #111A29 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .bg-stars {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cg fill='%23dfe8ff'%3E%3Ccircle cx='23' cy='41' r='.8' opacity='.7'/%3E%3Ccircle cx='88' cy='12' r='.5' opacity='.5'/%3E%3Ccircle cx='140' cy='96' r='.9' opacity='.8'/%3E%3Ccircle cx='201' cy='33' r='.6' opacity='.5'/%3E%3Ccircle cx='276' cy='70' r='.7' opacity='.6'/%3E%3Ccircle cx='54' cy='150' r='.5' opacity='.4'/%3E%3Ccircle cx='180' cy='182' r='.7' opacity='.7'/%3E%3Ccircle cx='300' cy='160' r='.5' opacity='.5'/%3E%3Ccircle cx='110' cy='240' r='.8' opacity='.6'/%3E%3Ccircle cx='240' cy='260' r='.6' opacity='.5'/%3E%3Ccircle cx='30' cy='290' r='.7' opacity='.6'/%3E%3Ccircle cx='262' cy='214' r='1' opacity='.9'/%3E%3C/g%3E%3C/svg%3E");
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+@keyframes lqSignal { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes lq-flow { to { stroke-dashoffset: -24; } }
+@media (prefers-reduced-motion: reduce) { .animate-\[lq-flow_1\.6s_linear_infinite\] { animation: none !important; } }
