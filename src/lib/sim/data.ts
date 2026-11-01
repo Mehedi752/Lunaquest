@@ -110,13 +110,16 @@ export const SOURCES = {
   spaceApps: { label: 'NASA Space Apps Challenge', url: 'https://www.spaceappschallenge.org/' },
 } satisfies Record<string, Source>;
 
-export const SIM_RULES = [
-  'Time advances one day at a time, only when you press Advance One Day. Real-world time has no effect.',
-  'Each astronaut uses 0.84 kg oxygen, 3 L water and 1.8 kg food per day.',
-  'Making 1 kg of oxygen by electrolysis consumes 1.125 kg (≈1.1 L) of water.',
-  'Solar output follows a fixed illumination profile; a shadow period occurs mid-mission.',
-  'If the battery empties, loads are shed in order: greenhouse, water recycling, then oxygen.',
-  'Radiation exposure is an abstract risk index, not a real radiation dose.',
-  'Completing a science objective earns 12 credits for upgrades and repairs.',
-  'If oxygen reaches zero or crew health falls to zero, the mission is aborted.',
+/** Every rule states where it comes from: `source` cites the NASA reference the figure is
+ *  drawn from, and `null` marks a pure game mechanic that no NASA document backs. Keeping
+ *  the two apart is the point — an invented citation would be worse than none. */
+export const SIM_RULES: { text: string; source: Source | null }[] = [
+  { text: 'Time advances one day at a time, only when you press Advance One Day. Real-world time has no effect.', source: null },
+  { text: 'Each astronaut uses 0.84 kg oxygen, 3 L water and 1.8 kg food per day.', source: SOURCES.eclss },
+  { text: 'Making 1 kg of oxygen by electrolysis consumes 1.125 kg (≈1.1 L) of water.', source: SOURCES.ecls },
+  { text: 'Solar output follows a fixed illumination profile; a shadow period occurs mid-mission.', source: SOURCES.power },
+  { text: 'If the battery empties, loads are shed in order: greenhouse, water recycling, then oxygen.', source: null },
+  { text: 'Radiation exposure is an abstract risk index, not a real radiation dose.', source: SOURCES.radiation },
+  { text: 'Completing a science objective earns 12 credits for upgrades and repairs.', source: null },
+  { text: 'If oxygen reaches zero or crew health falls to zero, the mission is aborted.', source: null },
 ];

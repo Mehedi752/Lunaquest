@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Battery, BookOpen, ChevronDown, Droplets, FlaskConical, Moon, Shield,
-  Sprout, Sun, Thermometer, Wind, Wrench, Zap,
+  AlertTriangle, ArrowLeft, ArrowRight, Battery, BookOpen, ChevronDown, Droplets, FlaskConical, Gamepad2,
+  Link as LinkIcon, Moon, Shield, Sprout, Sun, Thermometer, Wind, Wrench, Zap,
 } from 'lucide-react';
 import { SetupHeader } from '@/components/lq/setup-header';
 import { Button } from '@/components/ui/button';
@@ -136,7 +136,23 @@ export function Briefing() {
               <CollapsibleContent>
                 <div className="grid gap-x-7 px-5 pb-5 md:grid-cols-2">
                   {SIM_RULES.map((r, i) => (
-                    <div key={r} className="flex gap-2.5 border-t border-line-faint py-2.5 text-sm leading-relaxed text-ink-2"><span className="font-mono text-xs leading-7 text-cyan">R{i + 1}</span><span>{r}</span></div>
+                    <div key={r.text} className="flex gap-2.5 border-t border-line-faint py-2.5 text-sm leading-relaxed text-ink-2">
+                      <span className="font-mono text-xs leading-7 text-cyan">R{i + 1}</span>
+                      <span className="flex flex-col gap-1.5">
+                        <span>{r.text}</span>
+                        {r.source ? (
+                          <a href={r.source.url} target="_blank" rel="noopener noreferrer" className="group/s inline-flex items-start gap-1.5 text-[12.5px] leading-snug text-ink-muted transition-colors hover:text-cyan">
+                            <LinkIcon className="mt-[3px] size-3 shrink-0" />
+                            <span className="underline decoration-line underline-offset-[3px] group-hover/s:decoration-cyan">{r.source.label}</span>
+                          </a>
+                        ) : (
+                          <Link href="/sources" className="inline-flex items-start gap-1.5 text-[12.5px] leading-snug text-ink-faint transition-colors hover:text-cyan">
+                            <Gamepad2 className="mt-[3px] size-3 shrink-0" />
+                            <span>Game rule — no NASA source. See sources &amp; limits.</span>
+                          </Link>
+                        )}
+                      </span>
+                    </div>
                   ))}
                 </div>
                 <p className="flex gap-2.5 border-t border-line-faint px-5 pb-5 pt-3.5 text-[13px] text-warning"><AlertTriangle className="size-4 shrink-0" />These are illustrative game parameters. They are not suitable for designing real spacecraft or protecting real astronauts.</p>

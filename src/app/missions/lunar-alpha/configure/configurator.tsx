@@ -22,6 +22,15 @@ const TONE_UI: Record<Tone, { cls: string; Icon: React.ElementType }> = {
   ok: { cls: 'text-success', Icon: CheckCircle2 }, warn: { cls: 'text-warning', Icon: AlertTriangle }, bad: { cls: 'text-critical', Icon: OctagonAlert },
 };
 
+/** Plain-language key for the status colours, so the readout is not a guessing game.
+ *  Thresholds live in `t()` below: green clears the comfortable bar, yellow clears only
+ *  the lower one, red clears neither. */
+const LEGEND: { k: string; t: string; cls: string; Icon: React.ElementType }[] = [
+  { k: 'Green', t: 'Comfortable. The system meets demand with margin to spare.', cls: 'text-success', Icon: CheckCircle2 },
+  { k: 'Yellow', t: 'Tight. It works today, but one bad day could push it into the red.', cls: 'text-warning', Icon: AlertTriangle },
+  { k: 'Red', t: 'Short. Demand is not met — expect failures unless you spend more here.', cls: 'text-critical', Icon: OctagonAlert },
+];
+
 export function Configurator() {
   const router = useRouter();
   const hydrated = useHydrated();
@@ -140,6 +149,18 @@ export function Configurator() {
                   </li>
                 ))}
               </ul>
+              <div className="border-t border-line-faint px-5 pb-4 pt-3.5">
+                <div className="label mb-2.5">What the colours mean</div>
+                <ul className="flex flex-col gap-2">
+                  {LEGEND.map(l => (
+                    <li key={l.k} className="flex items-start gap-2.5 text-[12.5px] leading-snug">
+                      <l.Icon className={cn('mt-px size-3.5 shrink-0', l.cls)} />
+                      <span className="text-ink-muted"><span className={cn('font-semibold', l.cls)}>{l.k}</span> — {l.t}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2.5 text-[12px] leading-snug text-ink-faint">The credits figure above turns yellow once fewer than 10 remain. These colours are used by the capability readout below.</p>
+              </div>
             </section>
 
             <section aria-labelledby="cap-h" className="rounded-[14px] border border-line bg-surface">
