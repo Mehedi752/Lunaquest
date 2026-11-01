@@ -192,7 +192,7 @@ export default function DebriefPage() {
 
       <div className="flex flex-wrap justify-center gap-3 pt-3">
         <Link href="/mission/timeline" className={cn(buttonVariants({ variant: 'secondary', size: 'lg' }), 'h-[50px]')}><History />REVIEW MISSION</Link>
-        <Button size="lg" className="h-[50px]" onClick={() => { restart(); router.push('/mission'); }}><RotateCcw />TRY AGAIN</Button>
+        <Button size="lg" className="h-[50px]" onClick={() => { restart(); router.push('/play-3d'); }}><RotateCcw />TRY AGAIN</Button>
         <Link href="/missions" className={cn(buttonVariants({ variant: 'secondary', size: 'lg' }), 'h-[50px]')}><Rocket />START NEW MISSION</Link>
       </div>
     </main>

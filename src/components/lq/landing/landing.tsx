@@ -126,8 +126,11 @@ function Hero({ vw }: { vw: number }) {
           <div className="mt-[34px] flex flex-wrap gap-3">
             <Link href="/missions" className={cn(BTN, 'h-[54px] bg-[#5DE1FF] px-[26px] text-sm text-[#04111A] hover:bg-[#8BEBFF]')}>BEGIN MISSION <ArrowRight className="size-[18px]" /></Link>
             <Link href="/science" className={cn(BTN, 'h-[54px] border border-[#2E3F58] bg-[rgba(10,16,28,.6)] px-[22px] text-sm font-medium text-[#F3F7FC] hover:border-[#5DE1FF]')}><FlaskConical className="size-[17px]" />EXPLORE THE SCIENCE</Link>
-            <Link href="/play-3d" title="Walk the outpost in 3D" className={cn(BTN, 'h-[54px] border border-[#2E3F58] bg-[rgba(10,16,28,.6)] px-[22px] text-sm font-medium text-[#F3F7FC] hover:border-[#5DE1FF]')}><Box className="size-[17px]" />PLAY IN 3D</Link>
           </div>
+          <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-[#91A0B7]">
+            <Box className="size-4 text-[#5DE1FF]" aria-hidden />Missions launch in 3D.
+            <Link href="/mission" className="font-medium text-[#C4CEDD] underline decoration-[#2E3F58] underline-offset-4 transition-colors hover:text-[#5DE1FF] hover:decoration-[#5DE1FF]">Prefer the 2D dashboard?</Link>
+          </p>
         </div>
         <LiveConsole align={vw >= 1180 ? 'end' : 'center'} />
       </div>
@@ -525,7 +528,7 @@ function Footer() {
             <span>Not affiliated with or endorsed by NASA. Gameplay values are simplified for learning and must not be used for real mission or spacecraft design.</span>
           </p>
         </div>
-        {col('Play', [['Missions', '/missions'], ['Configure outpost', '/missions/lunar-alpha/configure'], ['Mission Control', '/mission'], ['3D mission', '/play-3d'], ['Debrief', '/mission/debrief']], 120)}
+        {col('Play', [['Missions', '/missions'], ['Configure outpost', '/missions/lunar-alpha/configure'], ['3D mission', '/play-3d'], ['2D Mission Control', '/mission'], ['Debrief', '/mission/debrief']], 120)}
         {col('Learn', [['Science Lab', '/science'], ['Sources & limits', '/sources'], ['Design system', '/design-system'], ['NASA Space Apps Challenge', 'https://www.spaceappschallenge.org/', true]], 200)}
       </div>
       <div className="mx-auto flex flex-wrap items-center justify-between gap-3 border-t border-[#121B2A] px-[clamp(20px,4vw,56px)] pb-[30px] pt-[18px] text-xs text-[#6F7D93]">

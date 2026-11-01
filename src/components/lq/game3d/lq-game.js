@@ -376,7 +376,7 @@
     }
     pickAt(x, y) {
       if (this.introOn) return; const u = this.raycast(x, y); if (!u) { this.closePanel(); return; }
-      if (u.crewId) { this.selected = this.crew.find(c => c.id === u.crewId); this.panel = { kind: 'crew', id: u.crewId }; this.renderPanel(); this.renderHud(); }
+      if (u.crewId) { this.selected = this.crew.find(c => c.id === u.crewId); this.panel = { kind: 'crew', id: u.crewId }; this.panelAnchor = this.anchorFor('crew', u.crewId); this.renderPanel(); this.renderHud(); }
       else if (u.facility) this.openFacility(u.facility);
     }
 
@@ -477,11 +477,44 @@
 
     openFacility(id) {
       this.panel = { kind: 'facility', id };
+      this.panelAnchor = this.anchorFor('facility', id);
       if (!this.m01.inspected.includes(id)) { this.m01.inspected.push(id); }
       if (['battery', 'solar'].includes(id)) this.m01.power = true;
       this.saveM01(); this.renderPanel(); this.renderHud();
     }
-    closePanel() { this.panel = null; this.renderPanel(); }
+    closePanel() { this.panel = null; this.panelAnchor = null; this.renderPanel(); }
+
+    /* The inspector is a popover pinned to the thing it describes, so the link between
+       panel and object is never in doubt. Crew move, so they anchor to a live object;
+       static facilities anchor to the top of their combined bounding box. */
+    anchorFor(kind, id) {
+      const T = this.T;
+      if (kind === 'crew') { const c = this.crew.find(x => x.id === id); return c ? { obj: c.g, local: new T.Vector3(0, 2.3, 0) } : null; }
+      const bb = new T.Box3(); let found = false;
+      this.clickables.forEach(o => { if (o.userData.facility === id && o.visible) { bb.expandByObject(o); found = true; } });
+      if (!found) return null;
+      const c = new T.Vector3(); bb.getCenter(c); c.y = bb.max.y + .25;
+      return { world: c };
+    }
+    /** Project the anchor to screen space each frame so the popover tracks orbit, zoom and walking crew. */
+    positionPanel() {
+      const host = this.$('[data-panel]'); if (!host) return;
+      const pop = host.firstElementChild; if (!pop) return;
+      // Asymmetric margins keep the popover clear of the top toolbar and the bottom command bar.
+      const w = this.clientWidth || 1, h = this.clientHeight || 1, MX = 12, MT = 70, MB = 96, GAP = 14;
+      const pw = pop.offsetWidth || 300, ph = pop.offsetHeight || 200, caret = pop.querySelector('[data-caret]'), a = this.panelAnchor;
+      if (!a) { pop.style.transform = `translate(${Math.round(Math.max(MX, w - pw - MX))}px, ${MT}px)`; pop.style.opacity = '1'; if (caret) caret.style.display = 'none'; return; }
+      this.camera.updateMatrixWorld();
+      this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+      const v = (a.world ? a.world.clone() : a.obj.localToWorld(a.local.clone())).project(this.camera);
+      const behind = v.z > 1, sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
+      let x = sx - pw / 2, y = sy - ph - GAP, below = false;
+      if (y < MT) { y = sy + GAP; below = true; }
+      x = clamp(x, MX, Math.max(MX, w - pw - MX)); y = clamp(y, MT, Math.max(MT, h - ph - MB));
+      pop.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+      pop.style.opacity = behind ? '0' : '1'; pop.style.pointerEvents = behind ? 'none' : 'auto';
+      if (caret) { caret.style.display = behind ? 'none' : 'block'; caret.style.left = Math.round(clamp(sx - x - 6, 12, Math.max(12, pw - 24))) + 'px'; caret.style.top = (below ? -6 : ph - 6) + 'px'; }
+    }
 
     objectives() {
       const s = this.sim, S = this.S, m = this.m01; if (!s) return [];
@@ -544,7 +577,7 @@
       if (this.cineUntil && t > this.cineUntil) this.endCine();
       if (!this.introOn) { const k = 1 - Math.exp(-dt * (this.camMode === 'cine' ? 2 : 4)); this.cam.target.lerp(this.goal.target, k); this.cam.r = lerp(this.cam.r, this.goal.r, k); this.cam.ph = lerp(this.cam.ph, this.goal.ph, k);
         let dth = this.goal.th - this.cam.th; dth = Math.atan2(Math.sin(dth), Math.cos(dth)); this.cam.th += dth * k; }
-      const c = this.cam; this.camera.position.set(c.target.x + c.r * Math.sin(c.ph) * Math.sin(c.th), c.target.y + c.r * Math.cos(c.ph), c.target.z + c.r * Math.sin(c.ph) * Math.cos(c.th)); this.camera.lookAt(c.target);
+      const c = this.cam; this.camera.position.set(c.target.x + c.r * Math.sin(c.ph) * Math.sin(c.th), c.target.y + c.r * Math.cos(c.ph), c.target.z + c.r * Math.sin(c.ph) * Math.cos(c.th)); this.camera.lookAt(c.target); this.positionPanel();
       // cutaway: hull fades when camera is close
       const wantHull = this.introOn || this.camMode === 'exterior' || c.r > 46; this.hullOpacity = lerp(this.hullOpacity, wantHull ? 1 : 0, 1 - Math.exp(-dt * 5));
       this.hull.visible = this.hullOpacity > .02; this.hull.traverse(o => { if (o.material) { o.material.opacity = this.hullOpacity; o.material.transparent = this.hullOpacity < .99; o.material.depthWrite = this.hullOpacity > .9; } });
@@ -682,7 +715,7 @@
       else if (a === 'choice') { this.decision.choice = d.id; this.renderEvent(); }
       else if (a === 'assign') { this.decision.assignee = d.value; this.renderEvent(); }
       else if (a === 'confirm') this.decide();
-      else if (a === 'crew') { this.selected = this.crew.find(c => c.id === d.id); this.panel = { kind: 'crew', id: d.id }; this.renderPanel(); this.renderHud(); }
+      else if (a === 'crew') { this.selected = this.crew.find(c => c.id === d.id); this.panel = { kind: 'crew', id: d.id }; this.panelAnchor = this.anchorFor('crew', d.id); this.renderPanel(); this.renderHud(); }
       else if (a === 'follow') { this.selected = this.crew.find(c => c.id === d.id); this.setMode('follow'); }
       else if (a === 'closePanel') this.closePanel();
       else if (a === 'goto') { const f = FACILITIES[d.id]; const r = ROOMS[f.room]; if (r) this.cine(r.x, r.z, 8, .7, null, 3); else this.setMode('exterior'); }
@@ -815,8 +848,10 @@
     renderPanel() {
       const box = this.$('[data-panel]'), s = this.sim, S = this.S, p = this.panel;
       if (!p || !s || this.introOn || this.cinematicHud) { box.innerHTML = ''; return; }
-      const wrap = (title, sub, icon, color, body) => `<div style="position:absolute;right:12px;top:76px;width:min(320px,90vw);max-height:calc(100% - 170px);overflow-y:auto;overflow-x:hidden;box-sizing:border-box;scrollbar-gutter:stable;z-index:2;${this.glass('padding:14px;border-color:#2E4560')}">
-        <div style="display:flex;align-items:center;gap:10px"><span style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:rgba(93,225,255,.08);color:${color}"><lq-icon name="${icon}" size="19"></lq-icon></span><div style="flex:1"><div style="font-size:16px;font-weight:700">${title}</div><div style="font-size:12px;color:${C.mut}">${sub}</div></div><button data-act="closePanel" aria-label="Close" style="${this.btn(false, 'width:34px;height:34px;padding:0')}"><lq-icon name="x" size="15"></lq-icon></button></div>${body}</div>`;
+      const wrap = (title, sub, icon, color, body) => `<div style="position:absolute;left:0;top:0;width:min(300px,86vw);z-index:6;opacity:0;will-change:transform;pointer-events:auto">
+        <span data-caret style="position:absolute;width:12px;height:12px;transform:rotate(45deg);border-radius:2px;background:#0A1120;border:1px solid #2E4560"></span>
+        <div style="position:relative;max-height:min(56vh,430px);overflow-y:auto;overflow-x:hidden;box-sizing:border-box;scrollbar-gutter:stable;box-shadow:0 18px 44px rgba(0,0,0,.55);${this.glass('padding:14px;border-color:#2E4560')}">
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:rgba(93,225,255,.08);color:${color}"><lq-icon name="${icon}" size="19"></lq-icon></span><div style="flex:1"><div style="font-size:16px;font-weight:700">${title}</div><div style="font-size:12px;color:${C.mut}">${sub}</div></div><button data-act="closePanel" aria-label="Close" style="${this.btn(false, 'width:34px;height:34px;padding:0')}"><lq-icon name="x" size="15"></lq-icon></button></div>${body}</div></div>`;
       const dl = rows => `<dl style="margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px">${rows.map(([k, v, c]) => `<dt style="color:${C.mut}">${k}</dt><dd style="margin:0;text-align:right;color:${c || C.ink}">${v}</dd>`).join('')}</dl>`;
       if (p.kind === 'crew') {
         const c = this.crew.find(x => x.id === p.id), loc = ROOMS[c.path.length ? c.targetRoom : c.room];

@@ -159,7 +159,7 @@ export function Configurator() {
               </div>
             </section>
 
-            <Button size="lg" className="h-[54px]" disabled={spent === 0} onClick={() => { deploy(); router.push('/mission'); }}><Rocket />DEPLOY OUTPOST</Button>
+            <Button size="lg" className="h-[54px]" disabled={spent === 0} onClick={() => { deploy(); router.push('/play-3d'); }}><Rocket />DEPLOY OUTPOST</Button>
             <Button variant="secondary" onClick={() => setConfig(emptyLevels())}><RotateCcw />RESET CONFIGURATION</Button>
             <p className="text-center text-xs text-ink-faint">All costs and capacities are illustrative game parameters.</p>
           </aside>
