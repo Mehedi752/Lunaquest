@@ -37,6 +37,7 @@
     "recharts": "^2.13.0",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
+    "three": "0.160.0",
     "zustand": "^4.5.5"
   },
   "devDependencies": {

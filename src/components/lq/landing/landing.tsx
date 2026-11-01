@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowRight, Award, Battery, CheckCircle2, Clock, Droplets, FlaskConical, Info, OctagonAlert, Pause, Play,
+  AlertTriangle, ArrowRight, Award, Battery, Box, CheckCircle2, Clock, Droplets, FlaskConical, Info, OctagonAlert, Pause, Play,
   Shield, Sprout, Sun, Users, Wind, Wrench, type LucideIcon,
 } from 'lucide-react';
 import { Emblem } from '@/components/lq/icons';
@@ -126,6 +126,7 @@ function Hero({ vw }: { vw: number }) {
           <div className="mt-[34px] flex flex-wrap gap-3">
             <Link href="/missions" className={cn(BTN, 'h-[54px] bg-[#5DE1FF] px-[26px] text-sm text-[#04111A] hover:bg-[#8BEBFF]')}>BEGIN MISSION <ArrowRight className="size-[18px]" /></Link>
             <Link href="/science" className={cn(BTN, 'h-[54px] border border-[#2E3F58] bg-[rgba(10,16,28,.6)] px-[22px] text-sm font-medium text-[#F3F7FC] hover:border-[#5DE1FF]')}><FlaskConical className="size-[17px]" />EXPLORE THE SCIENCE</Link>
+            <Link href="/play-3d" title="Walk the outpost in 3D" className={cn(BTN, 'h-[54px] border border-[#2E3F58] bg-[rgba(10,16,28,.6)] px-[22px] text-sm font-medium text-[#F3F7FC] hover:border-[#5DE1FF]')}><Box className="size-[17px]" />PLAY IN 3D</Link>
           </div>
         </div>
         <LiveConsole align={vw >= 1180 ? 'end' : 'center'} />
@@ -524,7 +525,7 @@ function Footer() {
             <span>Not affiliated with or endorsed by NASA. Gameplay values are simplified for learning and must not be used for real mission or spacecraft design.</span>
           </p>
         </div>
-        {col('Play', [['Missions', '/missions'], ['Configure outpost', '/missions/lunar-alpha/configure'], ['Mission Control', '/mission'], ['Debrief', '/mission/debrief']], 120)}
+        {col('Play', [['Missions', '/missions'], ['Configure outpost', '/missions/lunar-alpha/configure'], ['Mission Control', '/mission'], ['3D mission', '/play-3d'], ['Debrief', '/mission/debrief']], 120)}
         {col('Learn', [['Science Lab', '/science'], ['Sources & limits', '/sources'], ['Design system', '/design-system'], ['NASA Space Apps Challenge', 'https://www.spaceappschallenge.org/', true]], 200)}
       </div>
       <div className="mx-auto flex flex-wrap items-center justify-between gap-3 border-t border-[#121B2A] px-[clamp(20px,4vw,56px)] pb-[30px] pt-[18px] text-xs text-[#6F7D93]">

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Award, ChevronRight, FlaskConical, History, OctagonAlert, Wrench } from 'lucide-react';
+import { ArrowRight, Award, Box, ChevronRight, FlaskConical, History, OctagonAlert, Wrench } from 'lucide-react';
 import { MissionTopbar, type Speed } from './topbar';
 import { MissionNav } from './nav';
 import { EventDialog } from './event-dialog';
@@ -95,6 +95,7 @@ export function MissionShell({ children }: { children: React.ReactNode }) {
               <Link href="/mission/timeline" className={cn(buttonVariants({ variant: 'secondary' }), path === '/mission/timeline' && 'border-cyan')}><History />Review Decisions</Link>
               <Link href="/mission/build" className={cn(buttonVariants({ variant: 'secondary' }), path === '/mission/build' && 'border-cyan')}><Wrench />Manage Outpost</Link>
               <Link href="/science" className={buttonVariants({ variant: 'secondary' })}><FlaskConical />Science Lab</Link>
+              <Link href="/play-3d" className={buttonVariants({ variant: 'secondary' })} title="Same mission in 3D"><Box />3D view</Link>
               <div className="flex-1" />
               <span className="max-w-[300px] text-xs leading-snug text-ink-muted">
                 {ended ? 'The mission has ended.' : mission.pendingEvent ? 'Resolve the active emergency first.' : 'Advancing consumes a day of oxygen, water, food and power — and may trigger events.'}
