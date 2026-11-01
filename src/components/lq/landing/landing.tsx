@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowRight, Award, Battery, Box, CheckCircle2, Clock, Droplets, FlaskConical, Info, OctagonAlert, Pause, Play,
+  AlertTriangle, ArrowRight, Award, Battery, CheckCircle2, Clock, Droplets, FlaskConical, Info, OctagonAlert, Pause, Play,
   Shield, Sprout, Sun, Users, Wind, Wrench, type LucideIcon,
 } from 'lucide-react';
 import { Emblem } from '@/components/lq/icons';
@@ -127,10 +127,6 @@ function Hero({ vw }: { vw: number }) {
             <Link href="/missions" className={cn(BTN, 'h-[54px] bg-[#5DE1FF] px-[26px] text-sm text-[#04111A] hover:bg-[#8BEBFF]')}>BEGIN MISSION <ArrowRight className="size-[18px]" /></Link>
             <Link href="/science" className={cn(BTN, 'h-[54px] border border-[#2E3F58] bg-[rgba(10,16,28,.6)] px-[22px] text-sm font-medium text-[#F3F7FC] hover:border-[#5DE1FF]')}><FlaskConical className="size-[17px]" />EXPLORE THE SCIENCE</Link>
           </div>
-          <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-[#91A0B7]">
-            <Box className="size-4 text-[#5DE1FF]" aria-hidden />Missions launch in 3D.
-            <Link href="/mission" className="font-medium text-[#C4CEDD] underline decoration-[#2E3F58] underline-offset-4 transition-colors hover:text-[#5DE1FF] hover:decoration-[#5DE1FF]">Prefer the 2D dashboard?</Link>
-          </p>
         </div>
         <LiveConsole align={vw >= 1180 ? 'end' : 'center'} />
       </div>
