@@ -5,7 +5,9 @@
    Rendering reads engine state; every player action goes through the engine first, animations play after the engine confirms. */
 (function () {
   const C = { cyan: '#5DE1FF', ok: '#57D9A3', warn: '#FFC66D', crit: '#FF6B78', ink: '#F3F7FC', mut: '#91A0B7', line: '#1E2A3D' };
-  const M01KEY = 'lunaquest.m01', GFXKEY = 'lunaquest.gfx';
+  const M01KEY = 'lunaquest.m01', GFXKEY = 'lunaquest.gfx', MUSKEY = 'lunaquest.music';
+  // Spaces in the filename must be percent-encoded or the request 404s.
+  const MUSIC_SRC = '/lunaquest%20background%20music.wav', MUSIC_VOL = .45, MUSIC_DUCK = .08;
   const MOON_G = 1.62;
   const pad = n => String(n).padStart(2, '0');
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -48,6 +50,10 @@
     disconnectedCallback() {
       this._dead = true; cancelAnimationFrame(this._raf);
       if (this._kd) removeEventListener('keydown', this._kd); if (this._ku) removeEventListener('keyup', this._ku);
+      this.stopMusic(0);
+      if (this._vis) document.removeEventListener('visibilitychange', this._vis);
+      if (this.ac) { try { this.ac.close(); } catch (e) {} this.ac = null; }
+      if (this._dispose) { this._dispose.forEach(o => { try { o && o.dispose && o.dispose(); } catch (e) {} }); this._dispose = null; }
       if (this.ro) this.ro.disconnect(); if (this.renderer) { this.renderer.dispose(); this.renderer.forceContextLoss && this.renderer.forceContextLoss(); }
     }
 
@@ -67,7 +73,7 @@
       this.T = await import('three'); if (this._dead) return; bar(70);
       const probe = document.createElement('canvas'); if (!(probe.getContext('webgl2') || probe.getContext('webgl'))) throw new Error('No WebGL');
       this.gfx = localStorage.getItem(GFXKEY) || 'medium';
-      this.sound = false; this.labels = true; this.autoSpeed = 2.5; this.auto = false; this.cinematicHud = false; this.paused = false; this.panelsOpen = { left: true, right: true };
+      this.sound = false; this.music = (() => { try { return localStorage.getItem(MUSKEY) !== 'off'; } catch (e) { return true; } })(); this.labels = true; this.autoSpeed = 2.5; this.auto = false; this.cinematicHud = false; this.paused = false; this.panelsOpen = { left: true, right: true };
       this.m01 = this.loadM01();
       this.buildRenderer(); bar(80);
       this.buildWorld(); bar(92);
@@ -116,6 +122,199 @@
       const t = new T.CanvasTexture(c); t.colorSpace = T.SRGBColorSpace; t.anisotropy = 4; return t;
     }
 
+    /* ---------------- Earth ---------------- */
+    /** Procedural Earth: day/night/cloud canvases built once, a terminator shader, a cloud
+     *  shell, a fresnel atmosphere and a halo sprite. No external image files and no
+     *  per-frame allocation. Everything created here is tracked for disposal. */
+    buildEarth() {
+      const T = this.T, R = 14, keep = o => { (this._dispose = this._dispose || []).push(o); return o; };
+      let seed = 20260401;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+      const cv = () => { const c = document.createElement('canvas'); c.width = 1024; c.height = 512; return c; };
+
+      // Land is clustered islets rather than a few huge ellipses: small overlapping shapes
+      // give believable coastlines and leave the ocean dominant, the way Earth reads.
+      const land = cv(), lg = land.getContext('2d'), isles = [];
+      lg.fillStyle = '#000'; lg.fillRect(0, 0, 1024, 512);
+      for (let c = 0; c < 8; c++) {
+        const cx = rnd() * 1024, cy = 115 + rnd() * 282, spread = 50 + rnd() * 90, n = 14 + ((rnd() * 16) | 0);
+        for (let i = 0; i < n; i++) {
+          const x = cx + (rnd() - .5) * spread * 2, y = cy + (rnd() - .5) * spread;
+          if (y < 46 || y > 466) continue;
+          isles.push([x, y, 8 + rnd() * 24, 6 + rnd() * 15, rnd() * 3.14, rnd()]);
+        }
+      }
+      lg.fillStyle = '#fff';
+      isles.forEach(([x, y, rx, ry, rot]) => { lg.beginPath(); lg.ellipse(x, y, rx, ry, rot, 0, 7); lg.fill(); });
+      const mask = lg.getImageData(0, 0, 1024, 512).data;
+
+      const day = cv(), dg = day.getContext('2d');
+      const og = dg.createLinearGradient(0, 0, 0, 512);
+      og.addColorStop(0, '#06204c'); og.addColorStop(.28, '#0f4393'); og.addColorStop(.5, '#1868c6'); og.addColorStop(.72, '#0f4393'); og.addColorStop(1, '#06204c');
+      dg.fillStyle = og; dg.fillRect(0, 0, 1024, 512);
+      dg.filter = 'blur(9px)';
+      for (let i = 0; i < 40; i++) { dg.fillStyle = 'rgba(78,158,232,' + (.05 + rnd() * .1).toFixed(2) + ')'; dg.beginPath(); dg.ellipse(rnd() * 1024, rnd() * 512, 40 + rnd() * 120, 20 + rnd() * 60, rnd() * 3, 0, 7); dg.fill(); }
+      dg.filter = 'blur(1.2px)';
+      isles.forEach(([x, y, rx, ry, rot, v]) => {
+        dg.fillStyle = v > .88 ? '#b39b63' : v > .74 ? '#6f8f3f' : v > .4 ? '#2f7d36' : '#3b9440';
+        dg.beginPath(); dg.ellipse(x, y, rx, ry, rot, 0, 7); dg.fill();
+      });
+      dg.filter = 'none';
+      const cap = (y0, y1) => { const g2 = dg.createLinearGradient(0, y0, 0, y1); g2.addColorStop(0, 'rgba(248,252,255,.98)'); g2.addColorStop(.55, 'rgba(238,247,255,.5)'); g2.addColorStop(1, 'rgba(255,255,255,0)'); dg.fillStyle = g2; dg.fillRect(0, Math.min(y0, y1), 1024, Math.abs(y1 - y0)); };
+      cap(0, 42); cap(512, 470);
+
+      const night = cv(), ng = night.getContext('2d');
+      ng.fillStyle = '#05070d'; ng.fillRect(0, 0, 1024, 512);
+      for (let i = 0; i < 2600; i++) {
+        const x = (rnd() * 1024) | 0, y = (70 + rnd() * 372) | 0;
+        if (mask[(y * 1024 + x) * 4] < 128) continue;
+        ng.fillStyle = 'rgba(255,' + (190 + ((rnd() * 50) | 0)) + ',' + (120 + ((rnd() * 60) | 0)) + ',' + (.25 + rnd() * .6).toFixed(2) + ')';
+        ng.fillRect(x, y, rnd() > .85 ? 2 : 1, 1);
+      }
+
+      // Thin wisps, not wide bands: wide high-alpha ellipses read as a milky wash.
+      const cloud = cv(), cg = cloud.getContext('2d');
+      cg.filter = 'blur(1.4px)';
+      for (let i = 0; i < 120; i++) { cg.fillStyle = 'rgba(255,255,255,' + (.06 + rnd() * .2).toFixed(2) + ')'; cg.beginPath(); cg.ellipse(rnd() * 1024, rnd() * 512, 16 + rnd() * 74, 2.5 + rnd() * 6, (rnd() - .5) * .5, 0, 7); cg.fill(); }
+      for (let i = 0; i < 16; i++) { cg.fillStyle = 'rgba(255,255,255,' + (.22 + rnd() * .26).toFixed(2) + ')'; cg.beginPath(); cg.ellipse(rnd() * 1024, 90 + rnd() * 332, 24 + rnd() * 40, 7 + rnd() * 10, rnd() * 3, 0, 7); cg.fill(); }
+      cg.filter = 'none';
+
+      const tex = c => { const t = keep(new T.CanvasTexture(c)); t.colorSpace = T.SRGBColorSpace; t.anisotropy = 4; return t; };
+      const g = new T.Group(); g.position.set(-150, 95, -330); g.rotation.z = .41;
+      this.earthGroup = g; this.earthSun = new T.Vector3(1, 0, 0);
+      const uni = { dayMap: { value: tex(day) }, nightMap: { value: tex(night) }, cloudMap: { value: tex(cloud) }, sunDir: { value: this.earthSun } };
+      this.earthUniforms = uni;
+
+      const surf = new T.Mesh(keep(new T.SphereGeometry(R, 96, 64)), keep(new T.ShaderMaterial({
+        uniforms: uni,
+        vertexShader: [
+          'varying vec3 vN; varying vec2 vUv; varying vec3 vP;',
+          'void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal);',
+          '  vec4 wp = modelMatrix * vec4(position, 1.0); vP = wp.xyz;',
+          '  gl_Position = projectionMatrix * viewMatrix * wp; }',
+        ].join('\n'),
+        fragmentShader: [
+          'uniform sampler2D dayMap; uniform sampler2D nightMap; uniform vec3 sunDir;',
+          'varying vec3 vN; varying vec2 vUv; varying vec3 vP;',
+          'void main(){',
+          '  vec3 n = normalize(vN), sd = normalize(sunDir);',
+          '  float d = dot(n, sd);',
+          '  float lit = smoothstep(-0.06, 0.2, d);',
+          '  vec3 dayC = texture2D(dayMap, vUv).rgb, nightC = texture2D(nightMap, vUv).rgb;',
+          '  float ocean = clamp((dayC.b - max(dayC.r, dayC.g)) * 3.0, 0.0, 1.0);',
+          '  vec3 vd = normalize(cameraPosition - vP);',
+          '  float spec = pow(max(dot(reflect(-sd, n), vd), 0.0), 28.0) * ocean * lit * 0.5;',
+          '  vec3 col = mix(nightC * (1.0 - lit), dayC * (0.25 + 0.9 * max(d, 0.0)), lit) + spec;',
+          '  gl_FragColor = vec4(col, 1.0);',
+          '  #include <colorspace_fragment>',
+          '}',
+        ].join('\n'),
+      })));
+      surf.userData.earth = true; g.add(surf); this.earth = surf; this.clickables.push(surf);
+
+      this.earthClouds = new T.Mesh(keep(new T.SphereGeometry(R * 1.012, 64, 48)), keep(new T.ShaderMaterial({
+        uniforms: uni, transparent: true, depthWrite: false,
+        vertexShader: [
+          'varying vec3 vN; varying vec2 vUv;',
+          'void main(){ vUv = uv; vN = normalize(mat3(modelMatrix) * normal);',
+          '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        ].join('\n'),
+        fragmentShader: [
+          'uniform sampler2D cloudMap; uniform vec3 sunDir; varying vec3 vN; varying vec2 vUv;',
+          'void main(){ float a = texture2D(cloudMap, vUv).a;',
+          '  float lit = smoothstep(-0.06, 0.2, dot(normalize(vN), normalize(sunDir)));',
+          '  gl_FragColor = vec4(vec3(0.25 + 0.75 * lit), a * lit * 0.6);',
+          '  #include <colorspace_fragment>',
+          '}',
+        ].join('\n'),
+      })));
+      g.add(this.earthClouds);
+
+      const atm = new T.Mesh(keep(new T.SphereGeometry(R * 1.09, 64, 48)), keep(new T.ShaderMaterial({
+        uniforms: uni, transparent: true, side: T.BackSide, depthWrite: false, blending: T.AdditiveBlending,
+        vertexShader: [
+          'varying vec3 vN; varying vec3 vP;',
+          'void main(){ vN = normalize(mat3(modelMatrix) * normal);',
+          '  vec4 wp = modelMatrix * vec4(position, 1.0); vP = wp.xyz;',
+          '  gl_Position = projectionMatrix * viewMatrix * wp; }',
+        ].join('\n'),
+        fragmentShader: [
+          'uniform vec3 sunDir; varying vec3 vN; varying vec3 vP;',
+          'void main(){ vec3 n = normalize(vN), vd = normalize(cameraPosition - vP);',
+          '  float fres = pow(1.0 - abs(dot(n, vd)), 3.6);',
+          '  float lit = smoothstep(-0.25, 0.45, dot(-n, normalize(sunDir)));',
+          '  gl_FragColor = vec4(vec3(0.30, 0.56, 1.0) * fres * (0.2 + 1.0 * lit), fres * (0.16 + 0.6 * lit));',
+          '  #include <colorspace_fragment>',
+          '}',
+        ].join('\n'),
+      })));
+      atm.renderOrder = 2; g.add(atm);
+
+      const hc = document.createElement('canvas'); hc.width = hc.height = 256;
+      const hg = hc.getContext('2d'), rg = hg.createRadialGradient(128, 128, 8, 128, 128, 128);
+      rg.addColorStop(0, 'rgba(120,180,255,.3)'); rg.addColorStop(.45, 'rgba(70,130,235,.09)'); rg.addColorStop(1, 'rgba(40,90,200,0)');
+      hg.fillStyle = rg; hg.fillRect(0, 0, 256, 256);
+      const halo = new T.Sprite(keep(new T.SpriteMaterial({ map: keep(new T.CanvasTexture(hc)), blending: T.AdditiveBlending, transparent: true, depthWrite: false })));
+      halo.scale.setScalar(R * 3.2); halo.renderOrder = -1; g.add(halo);
+
+      this.scene.add(g);
+      this.earthCamPos = new T.Vector3(26, 3.6, 46);
+      this.earthFov = 19;
+      this.setEarthSun();
+    }
+
+    /** Synodic month: the phase walks once round every 29.53 mission days. */
+    earthPhiFor(s) { return .55 + Math.PI * 2 * (((s && s.day) || 1) - 1) / 29.53; }
+    earthInfo() {
+      const a = ((this.earthPhiFor(this.sim) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const k = (1 - Math.cos(a)) / 2, waxing = a < Math.PI;
+      const name = k < .02 ? 'New Earth' : k > .98 ? 'Full Earth'
+        : Math.abs(k - .5) < .06 ? (waxing ? 'Half Earth (growing)' : 'Half Earth (shrinking)')
+          : waxing ? (k < .5 ? 'Waxing crescent' : 'Waxing gibbous')
+            : (k < .5 ? 'Waning crescent' : 'Waning gibbous');
+      return { a, k, pct: Math.round(k * 100), waxing, name };
+    }
+    /** Aim the shader's sun so the phase reads correctly from the Earth-view camera. */
+    setEarthSun() {
+      if (!this.earthUniforms) return;
+      const T = this.T, phi = this.earthPhiFor(this.sim);
+      this._eV = this._eV || new T.Vector3(); this._eU = this._eU || new T.Vector3(); this._eUp = this._eUp || new T.Vector3(0, 1, 0);
+      this._eV.subVectors(this.earthCamPos, this.earthGroup.position).normalize();
+      this._eU.crossVectors(this._eV, this._eUp).normalize();
+      this.earthSun.set(0, 0, 0).addScaledVector(this._eV, -Math.cos(phi)).addScaledVector(this._eU, Math.sin(phi)).normalize();
+      this._earthDay = this.sim ? this.sim.day : 1;
+    }
+    enterEarthView() {
+      if (!this.earthGroup || this.camMode === 'earth') return;
+      this._earthPrevMode = this.camMode === 'cine' ? 'explore' : this.camMode;
+      this.cineUntil = 0; this.camMode = 'earth'; this._earthT0 = this.time;
+      this._earthFrom = (this._earthFrom || new this.T.Vector3()).copy(this.camera.position);
+      this._earthFromLook = (this._earthFromLook || new this.T.Vector3()).copy(this.cam.target);
+      this._earthFromFov = this.camera.fov; this.earthFov = 19;
+      if (this.roomLabels) this.roomLabels.forEach(l => { l.visible = false; });
+      this.setEarthSun(); this.closePanel(); this.renderHud();
+    }
+    /** Stand on the surface and look up, Earthrise-style: ease in, then drift gently. */
+    updateEarthCamera() {
+      const T = this.T, e = RM() ? 1 : smooth(0, 1.6, this.time - this._earthT0), dr = RM() ? 0 : 1, t = this.time;
+      this._eP = this._eP || new T.Vector3(); this._eL = this._eL || new T.Vector3();
+      this._eP.set(this.earthCamPos.x + Math.sin(t * .17) * .25 * dr, this.earthCamPos.y + Math.sin(t * .23 + 1) * .12 * dr, this.earthCamPos.z + Math.cos(t * .13) * .25 * dr);
+      this.camera.position.lerpVectors(this._earthFrom, this._eP, e);
+      this._eL.lerpVectors(this._earthFromLook, this.earthGroup.position, e);
+      this.camera.lookAt(this._eL);
+      const fov = this._earthFromFov + (this.earthFov - this._earthFromFov) * e;
+      if (Math.abs(this.camera.fov - fov) > .002) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    }
+    /** Lit-limb disc: outer semicircle plus a terminator ellipse, mirrored when waning. */
+    phaseSvg(k, waxing, size = 26) {
+      // Sweep picks crescent vs gibbous; the mirror matches the sky, where a waxing Earth is lit on the left.
+      const R = 10, rx = (R * Math.abs(1 - 2 * k)).toFixed(2), inner = k < .5 ? 0 : 1;
+      return '<svg viewBox="-12 -12 24 24" width="' + size + '" height="' + size + '" aria-hidden="true" style="display:block">'
+        + '<circle cx="0" cy="0" r="' + R + '" fill="#101a2b"/>'
+        + '<g transform="scale(' + (waxing ? -1 : 1) + ',1)"><path d="M0,' + (-R) + ' A' + R + ',' + R + ' 0 0,1 0,' + R + ' A' + rx + ',' + R + ' 0 0,' + inner + ' 0,' + (-R) + ' Z" fill="#DCE8FF"/></g>'
+        + '<circle cx="0" cy="0" r="' + R + '" fill="none" stroke="#2E3F58" stroke-width="1"/></svg>';
+    }
+
     buildWorld() {
       const T = this.T, S = this.scene;
       this.clickables = [];
@@ -128,14 +327,7 @@
       for (let i = 0; i < 3000; i++) { const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2, r = 700, s = Math.sqrt(1 - u * u); sp.set([r * s * Math.cos(th), Math.abs(r * u) * .9 + 20, r * s * Math.sin(th)], i * 3); }
       sg.setAttribute('position', new T.BufferAttribute(sp, 3));
       S.add(new T.Points(sg, new T.PointsMaterial({ color: '#dfe8ff', size: 1.4, sizeAttenuation: false })));
-      // Earth (procedural texture)
-      const ec = document.createElement('canvas'); ec.width = 512; ec.height = 256; const eg = ec.getContext('2d');
-      eg.fillStyle = '#1d4f9a'; eg.fillRect(0, 0, 512, 256);
-      for (let i = 0; i < 26; i++) { eg.fillStyle = i % 3 ? '#3f7d3a' : '#a08a5a'; eg.beginPath(); eg.ellipse(Math.random() * 512, 40 + Math.random() * 176, 18 + Math.random() * 46, 10 + Math.random() * 30, Math.random() * 3, 0, 7); eg.fill(); }
-      eg.globalAlpha = .75; for (let i = 0; i < 60; i++) { eg.fillStyle = '#fff'; eg.beginPath(); eg.ellipse(Math.random() * 512, Math.random() * 256, 10 + Math.random() * 40, 3 + Math.random() * 7, Math.random(), 0, 7); eg.fill(); }
-      const et = new T.CanvasTexture(ec); et.colorSpace = T.SRGBColorSpace;
-      this.earth = new T.Mesh(new T.SphereGeometry(14, 48, 32), new T.MeshStandardMaterial({ map: et, roughness: .9, emissive: '#0b1c38', emissiveIntensity: .25 }));
-      this.earth.position.set(-150, 95, -330); S.add(this.earth);
+      this.buildEarth();
       // terrain with craters and distant mountains; flat pad around the base
       const CR = [[-52, -40, 9, 2.4], [48, 30, 12, 2.8], [-38, 42, 7, 1.8], [70, -55, 16, 3.2], [-80, 10, 11, 2.6], [25, 70, 8, 2], [-20, -75, 14, 3], [95, 20, 9, 2]];
       const H = (x, z) => {
@@ -162,9 +354,10 @@
       const shelterM = this.mat('#7d8a99', { roughness: .6, metalness: .3 });
       this.box(30, .2, 12, floorM, 0, -0.1, 0, hab); this.box(30, .21, 2.4, corrM, 0, -0.095, 0, hab);
       // floor room labels
+      this.roomLabels = [];
       for (const [id, r] of Object.entries(ROOMS)) { if (!r.side) continue;
         const p = new T.Mesh(new T.PlaneGeometry(4.6, 1.15), new T.MeshBasicMaterial({ map: this.textTex(r.name.toUpperCase(), { size: 44 }), transparent: true, opacity: .75, depthWrite: false }));
-        p.rotation.x = -Math.PI / 2; p.position.set(r.x, .02, r.side * 2.2); hab.add(p); }
+        p.rotation.x = -Math.PI / 2; p.position.set(r.x, .02, r.side * 2.2); hab.add(p); this.roomLabels.push(p); }
       this.cutWalls = [];
       const wall = (w, d, x, z, m = wallM, cut = false, h = 2.4) => { const me = this.box(w, h, d, m, x, h / 2, z, hab); if (cut) { me.userData.fullH = h; this.cutWalls.push(me); } return me; };
       // outer walls with gaps for airlock (west) and greenhouse (east)
@@ -336,19 +529,28 @@
         if (e.target.closest && e.target.closest('input,select,textarea')) return;
         const k = e.key.toLowerCase();
         if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) { this.keys.add(k); if (this.camMode === 'follow') this.setMode('explore'); }
-        if (k === 'escape') { e.preventDefault(); this.togglePause(); }
+        if (k === 'escape') { e.preventDefault(); if (this.camMode === 'earth') this.setMode(this._earthPrevMode || 'explore'); else this.togglePause(); }
         if (k === ' ' && !this.introOn) { e.preventDefault(); this.advance(); }
         if (k === 'h') this.toggleCineHud();
         if (k === 'e' && this.hovered) this.openFacility(this.hovered);
-        if (k === '1') this.setMode('explore'); if (k === '2') this.setMode('top'); if (k === '3') this.setMode('follow'); if (k === '4') this.setMode('exterior');
+        if (k === '1') this.setMode('explore'); if (k === '2') this.setMode('top'); if (k === '3') this.setMode('follow'); if (k === '4') this.setMode('exterior'); if (k === '5') this.setMode('earth');
       };
       this._ku = e => this.keys.delete(e.key.toLowerCase());
       addEventListener('keydown', this._kd); addEventListener('keyup', this._ku);
     }
-    zoom(f) { this.goal.r = clamp(this.goal.r * f, 4, 140); }
+    zoom(f) {
+      if (this.camMode === 'earth') { this.earthFov = clamp(this.earthFov * f, 5, 34); this.camera.fov = this.earthFov; this.camera.updateProjectionMatrix(); return; }
+      this.goal.r = clamp(this.goal.r * f, 4, 140);
+    }
     pan(dx, dy) { const T = this.T, s = this.goal.r * .0016, f = new T.Vector3(Math.sin(this.goal.th), 0, Math.cos(this.goal.th)), r = new T.Vector3(f.z, 0, -f.x);
       this.goal.target.addScaledVector(r, -dx * s).addScaledVector(f, -dy * s); this.goal.target.x = clamp(this.goal.target.x, -40, 40); this.goal.target.z = clamp(this.goal.target.z, -40, 30); }
     setMode(m, opt) {
+      if (this.camMode === 'earth' && m !== 'earth') {
+        this.camera.fov = 45; this.camera.updateProjectionMatrix();
+        if (this.roomLabels) this.roomLabels.forEach(l => { l.visible = true; });
+        this.earthWhy = false;
+      }
+      if (m === 'earth') return this.enterEarthView();
       this.camMode = m; this.cineUntil = 0;
       const G = this.goal;
       if (m === 'explore') Object.assign(G, { r: 26, ph: .85 }), G.target.set(1, 0, 0);
@@ -362,21 +564,58 @@
     raycast(cx, cy) {
       const T = this.T, rect = this.renderer.domElement.getBoundingClientRect();
       this._ray = this._ray || new T.Raycaster(); this._ray.setFromCamera(new T.Vector2(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1), this.camera);
-      const hits = this._ray.intersectObjects(this.clickables.filter(o => o.visible && (!this.hull.visible || !o.userData.facility || this.hullOpacity < .5 || o.parent === this.hull || !this.isInside(o))), false);
-      return hits[0] ? hits[0].object.userData : null;
+      // Two rules: a solid hull blocks clicks on what is behind it, and a faded-out hull
+      // must not keep swallowing them — an invisible shell used to eat every interior click.
+      const faded = this.hullOpacity < .5;
+      const hits = this._ray.intersectObjects(this.clickables.filter(o => o.visible && (!this.hull.visible || !o.userData.facility || faded || o.parent === this.hull || !this.isInside(o))), false);
+      if (!hits.length) return null;
+      // Through a faded-out shell, reach the thing behind it: take the nearest non-hull hit
+      // and only fall back to the shell itself (the floor, usually) when there is none.
+      let h = hits[0];
+      if (faded) { const inner = hits.find(x => !this.inHull(x.object)); if (inner) h = inner; }
+      const u = h.object.userData;
+      // The whole shell is tagged 'habitat' (= Mission Control), so resolve which room was
+      // actually hit; otherwise every wall, roof and floor opens that same one panel.
+      if (u.facility === 'habitat') { const f = this.roomFacilityAt(h.point); if (f && f !== 'habitat') return { facility: f }; }
+      return u;
+    }
+    inHull(o) { let p = o; while (p) { if (p === this.hull) return true; p = p.parent; } return false; }
+    /** Which facility owns the room containing this world point. */
+    roomFacilityAt(pt) {
+      if (!this.hab) return null;
+      if (!this._roomFac) {
+        this._roomFac = {};
+        for (const [id, f] of Object.entries(FACILITIES)) if (f.room && f.room !== 'outside' && !this._roomFac[f.room]) this._roomFac[f.room] = id;
+      }
+      const q = this._rp = (this._rp || new this.T.Vector3());
+      q.copy(pt); this.hab.worldToLocal(q);
+      for (const [rid, r] of Object.entries(ROOMS)) {
+        if (!r.side) continue;
+        if (Math.abs(q.x - r.x) <= 3.75 && q.z * r.side > 1 && q.z * r.side < 6.6) return this._roomFac[rid] || null;
+      }
+      if (q.x > 15.5) return 'greenhouse';
+      if (q.x < -14.5) return 'airlock';
+      return null;
     }
     isInside(o) { let p = o; while (p) { if (p === this.hab) return !this.solarArrays.includes(o.parent); p = p.parent; } return false; }
     hoverAt(x, y) {
       if (this._hoverT && performance.now() - this._hoverT < 60) return; this._hoverT = performance.now();
       const u = this.raycast(x, y), tip = this.$('[data-tip]');
       this.hovered = u && u.facility ? u.facility : null; const crewId = u && u.crewId;
-      this.renderer.domElement.style.cursor = u && (u.facility || crewId) ? 'pointer' : 'grab';
-      if (u && (u.facility || crewId)) { const label = crewId ? CREW.find(c => c.id === crewId).name : FACILITIES[u.facility].name;
-        tip.textContent = label + (crewId ? ' · click for details' : ' · click to inspect'); tip.style.display = 'block'; tip.style.left = x + 14 + 'px'; tip.style.top = y + 14 + 'px'; } else tip.style.display = 'none';
+      this.renderer.domElement.style.cursor = u && (u.facility || crewId || u.earth) ? 'pointer' : 'grab';
+      if (u && (u.facility || crewId || u.earth)) {
+        const label = u.earth ? 'Earth' : crewId ? CREW.find(c => c.id === crewId).name : FACILITIES[u.facility].name;
+        const p = this.panel, shown = !!p && ((u.facility && p.kind === 'facility' && p.id === u.facility) || (crewId && p.kind === 'crew' && p.id === crewId));
+        const hint = u.earth ? (this.camMode === 'earth' ? '' : ' · click for Earth view')
+          : shown ? '' : crewId ? ' · click for details' : ' · click to inspect';
+        tip.textContent = label + hint; tip.style.display = 'block'; tip.style.left = x + 14 + 'px'; tip.style.top = y + 14 + 'px';
+      } else tip.style.display = 'none';
     }
     pickAt(x, y) {
       if (this.introOn) return; const u = this.raycast(x, y); if (!u) { this.closePanel(); return; }
-      if (u.crewId) { this.selected = this.crew.find(c => c.id === u.crewId); this.panel = { kind: 'crew', id: u.crewId }; this.panelAnchor = this.anchorFor('crew', u.crewId); this.renderPanel(); this.renderHud(); }
+      const tip = this.$('[data-tip]'); if (tip) tip.style.display = 'none';
+      if (u.earth) { this.setMode('earth'); return; }
+      if (u.crewId) { this.selected = this.crew.find(c => c.id === u.crewId); this.panel = { kind: 'crew', id: u.crewId }; this.panelAnchor = this.anchorFor('crew', u.crewId); this.focusCrew(this.selected); this.renderPanel(); this.renderHud(); }
       else if (u.facility) this.openFacility(u.facility);
     }
 
@@ -478,23 +717,55 @@
     openFacility(id) {
       this.panel = { kind: 'facility', id };
       this.panelAnchor = this.anchorFor('facility', id);
+      this.focusFacility(id);
       if (!this.m01.inspected.includes(id)) { this.m01.inspected.push(id); }
       if (['battery', 'solar'].includes(id)) this.m01.power = true;
       this.saveM01(); this.renderPanel(); this.renderHud();
     }
-    closePanel() { this.panel = null; this.panelAnchor = null; this.renderPanel(); }
+    closePanel() { this.panel = null; this.panelAnchor = null; this._panelHtml = ''; this.renderPanel(); }
 
     /* The inspector is a popover pinned to the thing it describes, so the link between
        panel and object is never in doubt. Crew move, so they anchor to a live object;
        static facilities anchor to the top of their combined bounding box. */
+    /** World bounds of every mesh tagged with this facility. The inspector anchor and the
+     *  camera focus both read from here, so the panel and the shot can never disagree. */
+    facilityBounds(id) {
+      const T = this.T, bb = new T.Box3(); let found = false;
+      this.clickables.forEach(o => { if (o.userData.facility === id) { bb.expandByObject(o); found = true; } });
+      if (!found) return null;
+      const center = new T.Vector3(), size = new T.Vector3();
+      bb.getCenter(center); bb.getSize(size);
+      return { center, top: bb.max.y, radius: Math.max(size.x, size.y, size.z) * .5 };
+    }
     anchorFor(kind, id) {
       const T = this.T;
       if (kind === 'crew') { const c = this.crew.find(x => x.id === id); return c ? { obj: c.g, local: new T.Vector3(0, 2.3, 0) } : null; }
-      const bb = new T.Box3(); let found = false;
-      this.clickables.forEach(o => { if (o.userData.facility === id && o.visible) { bb.expandByObject(o); found = true; } });
-      if (!found) return null;
-      const c = new T.Vector3(); bb.getCenter(c); c.y = bb.max.y + .25;
+      const b = this.facilityBounds(id); if (!b) return null;
+      const c = b.center.clone(); c.y = b.top + .25;
       return { world: c };
+    }
+    /** Fly to the object itself, framed by its own size and viewed from outside the outpost.
+     *  The old 'Show me' flew to the room a facility was filed under, which missed outdoor
+     *  equipment completely — ROOMS has no 'outside' entry. */
+    focusFacility(id) {
+      const b = this.facilityBounds(id);
+      if (!b) { this.setMode('exterior'); return; }
+      const G = this.goal;
+      G.target.copy(b.center);
+      G.r = clamp(b.radius * 3.2 + 4, 8, 70);
+      G.ph = 1.02;
+      G.th = Math.atan2(b.center.x, b.center.z);
+      this.camMode = 'cine'; this.cineUntil = this.time + 2.4;
+      this.renderHud();
+    }
+    /** Crew walk, so frame where they are standing right now. */
+    focusCrew(c) {
+      if (!c) return;
+      const p = c.g.getWorldPosition(new this.T.Vector3()), G = this.goal;
+      G.target.set(p.x, 1.1, p.z);
+      G.r = 9; G.ph = 1.05; G.th = Math.atan2(p.x, p.z);
+      this.camMode = 'cine'; this.cineUntil = this.time + 2.2;
+      this.renderHud();
     }
     /** Project the anchor to screen space each frame so the popover tracks orbit, zoom and walking crew. */
     positionPanel() {
@@ -577,7 +848,7 @@
       if (this.cineUntil && t > this.cineUntil) this.endCine();
       if (!this.introOn) { const k = 1 - Math.exp(-dt * (this.camMode === 'cine' ? 2 : 4)); this.cam.target.lerp(this.goal.target, k); this.cam.r = lerp(this.cam.r, this.goal.r, k); this.cam.ph = lerp(this.cam.ph, this.goal.ph, k);
         let dth = this.goal.th - this.cam.th; dth = Math.atan2(Math.sin(dth), Math.cos(dth)); this.cam.th += dth * k; }
-      const c = this.cam; this.camera.position.set(c.target.x + c.r * Math.sin(c.ph) * Math.sin(c.th), c.target.y + c.r * Math.cos(c.ph), c.target.z + c.r * Math.sin(c.ph) * Math.cos(c.th)); this.camera.lookAt(c.target); this.positionPanel();
+      const c = this.cam; this.camera.position.set(c.target.x + c.r * Math.sin(c.ph) * Math.sin(c.th), c.target.y + c.r * Math.cos(c.ph), c.target.z + c.r * Math.sin(c.ph) * Math.cos(c.th)); this.camera.lookAt(c.target); if (this.camMode === 'earth') this.updateEarthCamera(); this.positionPanel();
       // cutaway: hull fades when camera is close
       const wantHull = this.introOn || this.camMode === 'exterior' || c.r > 46; this.hullOpacity = lerp(this.hullOpacity, wantHull ? 1 : 0, 1 - Math.exp(-dt * 5));
       this.hull.visible = this.hullOpacity > .02; this.hull.traverse(o => { if (o.material) { o.material.opacity = this.hullOpacity; o.material.transparent = this.hullOpacity < .99; o.material.depthWrite = this.hullOpacity > .9; } });
@@ -604,7 +875,10 @@
       sk.sg.attributes.position.needsUpdate = true; sk.emit = null;
       // crew
       this.crew.forEach(cr => this.updateCrew(cr, dt, t));
-      this.earth.rotation.y += dt * .01;
+      if (this.earthGroup) {
+        this.earth.rotation.y += dt * .012; this.earthClouds.rotation.y += dt * .017;
+        const ed = this.sim ? this.sim.day : 1; if (ed !== this._earthDay) this.setEarthSun();
+      }
       this.renderer.render(this.scene, this.camera);
       if (this._hudTick === undefined || t - this._hudTick > .5) { this._hudTick = t; this.renderCrewTasks(); }
     }
@@ -629,7 +903,7 @@
       else if (cr.anim === 'celebrate') { la = -2.7 + Math.sin(p * 6) * .2; ra = -2.7 - Math.sin(p * 6) * .2; lz = .3; rz = -.3; bob = Math.abs(Math.sin(p * 3)) * .08; }
       else { la = Math.sin(p) * .04; ra = -la; bob = Math.sin(p) * .008; }
       L[0].rotation.x = lleg; L[1].rotation.x = rleg; A[0].rotation.x = la; A[1].rotation.x = ra; A[0].rotation.z = lz; A[1].rotation.z = rz; g.position.y = bob;
-      const sel = this.selected === cr; cr.ring.material.opacity = sel ? .7 + .3 * Math.sin(t * 4) : 0; cr.tag.visible = this.labels && (sel || this.cam.r < 30); cr.tag.position.y = cr.sheltered ? 2.15 + (CREW.findIndex(c => c.id === cr.id) % 2) * .55 : 2.25;
+      const sel = this.selected === cr; cr.ring.material.opacity = sel ? .7 + .3 * Math.sin(t * 4) : 0; cr.tag.visible = this.labels && this.camMode !== 'earth' && (sel || this.cam.r < 30); cr.tag.position.y = cr.sheltered ? 2.15 + (CREW.findIndex(c => c.id === cr.id) % 2) * .55 : 2.25;
     }
 
     /* ---------------- intro ---------------- */
@@ -643,6 +917,7 @@
           <button data-act="begin" style="${this.btn(!sv)};height:54px;padding:0 22px;font-size:15px">${sv ? 'START NEW MISSION' : 'BEGIN MISSION'} <lq-icon name="rocket" size="18"></lq-icon></button>
           <a href="/missions/lunar-alpha/configure" style="${this.btn()};height:54px;text-decoration:none">Configure outpost</a>
           <button data-act="help" style="${this.btn()};height:54px">How to play</button>
+          <a href="/" style="${this.btn()};height:54px;text-decoration:none" title="Back to the LunaQuest home page"><lq-icon name="home" size="16"></lq-icon>Home</a>
         </div>
         <p style="margin:12px 0 0;font-size:12.5px;line-height:1.5;color:${C.mut}">${sv ? `Your current mission (${sv.mission}) is shared with the 2D view. ` : ''}Uses ${cfg ? 'your saved outpost setup' : 'the suggested outpost setup'} · emergencies are different every mission.</p>`;
     }
@@ -661,6 +936,7 @@
       if (this.introChoice === 'continue' && this.sim && this.sim.status === 'active') { this.syncVisuals(); if (this.sim.pendingEvent) this.startEvent(this.sim.pendingEvent); }
       else this.newMission(this.introScen || this.S.loadScenario());
       if (!this.sim.history || this.sim.day === 1) this.showBrief = true;
+      this.startMusic();
       this.renderHud();
     }
 
@@ -670,7 +946,7 @@
       const hud = document.createElement('div'); hud.setAttribute('data-hud', '');
       hud.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:5';
       hud.innerHTML = `
-        <div data-top></div><div data-left></div><div data-right></div><div data-bottom></div><div data-event></div><div data-panel></div><div data-toast style="position:absolute;left:50%;bottom:86px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:min(560px,92vw)"></div>
+        <div data-top></div><div data-left></div><div data-right></div><div data-bottom></div><div data-event></div><div data-panel></div><div data-earth></div><div data-toast style="position:absolute;left:50%;bottom:86px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:min(560px,92vw)"></div>
         <div data-modal></div>
         <div data-tip style="position:fixed;display:none;padding:6px 10px;border-radius:8px;background:rgba(6,10,19,.92);border:1px solid ${C.line};font-size:13px;pointer-events:none;z-index:20"></div>
         <div data-intro style="position:absolute;inset:0;display:none;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;scrollbar-gutter:stable;place-items:end start;padding:clamp(24px,6vw,80px);pointer-events:auto;background:linear-gradient(90deg,rgba(3,5,10,.85),rgba(3,5,10,.2) 60%,rgba(3,5,10,0))">
@@ -703,6 +979,8 @@
       else if (a === 'wait') { const n = S.waitForReply(this.sim); if (n !== this.sim) { this.commit(n); this.toast((n.lastDay && n.lastDay.why[0]) || 'You waited one day for Earth.', 'warn', 6000); if (n.status !== 'active') this.endMission(); } this.renderEvent(); }
       else if (a === 'bonus') { const n = S.bonusExperiment(this.sim); if (n === this.sim) this.toast(S.bonusInfo(this.sim).reason || 'Not available right now.', 'warn'); else { this.commit(n); const sci = this.crew.find(c => c.id === 'sci'); if (!sci.busy && !sci.sheltered) this.send(sci, SPOTS.airlock[0], { task: 'Bonus spacewalk experiment', then: () => { sci.anim = 'work'; sci.busy = { until: this.time + 3, then: () => this.returnHome(sci) }; } }); this.toast(`Bonus spacewalk: science moved forward, ${S.P.bonusO2} kg of oxygen used.`, 'ok'); this.beep('ok'); } }
       else if (a === 'skipCine') this.endCine();
+      else if (a === 'backbase') this.setMode(this._earthPrevMode || 'explore');
+      else if (a === 'earthwhy') { this.earthWhy = !this.earthWhy; this.renderEarthCard(); }
       else if (a === 'advance') this.advance();
       else if (a === 'mode') this.setMode(d.mode);
       else if (a === 'pause') this.togglePause();
@@ -715,29 +993,31 @@
       else if (a === 'choice') { this.decision.choice = d.id; this.renderEvent(); }
       else if (a === 'assign') { this.decision.assignee = d.value; this.renderEvent(); }
       else if (a === 'confirm') this.decide();
-      else if (a === 'crew') { this.selected = this.crew.find(c => c.id === d.id); this.panel = { kind: 'crew', id: d.id }; this.panelAnchor = this.anchorFor('crew', d.id); this.renderPanel(); this.renderHud(); }
+      else if (a === 'crew') { this.selected = this.crew.find(c => c.id === d.id); this.panel = { kind: 'crew', id: d.id }; this.panelAnchor = this.anchorFor('crew', d.id); this.focusCrew(this.selected); this.renderPanel(); this.renderHud(); }
       else if (a === 'follow') { this.selected = this.crew.find(c => c.id === d.id); this.setMode('follow'); }
       else if (a === 'closePanel') this.closePanel();
-      else if (a === 'goto') { const f = FACILITIES[d.id]; const r = ROOMS[f.room]; if (r) this.cine(r.x, r.z, 8, .7, null, 3); else this.setMode('exterior'); }
+      else if (a === 'goto') this.focusFacility(d.id);
       else if (a === 'upgrade') { const n = S.purchase(this.sim, d.eq); if (n === this.sim) this.toast('Not enough credits for this upgrade.', 'warn'); else { this.commit(n); this.toast(`${S.EQUIPMENT.find(e => e.id === d.eq).name} upgraded to level ${n.levels[d.eq]}.`, 'ok'); this.beep('ok'); } this.renderPanel(); if (this.modal === 'build') this.renderModal(); }
       else if (a === 'switch') { const pw = S.powerOf(this.sim); this.commit(S.setPower(this.sim, d.sw, !pw[d.sw])); this.renderPanel(); }
       else if (a === 'gfx') { this.gfx = d.value; localStorage.setItem(GFXKEY, this.gfx); this.applyGfx(); this.renderModal(); }
       else if (a === 'sound') { this.sound = !this.sound; if (this.sound) this.beep('ok'); this.renderModal(); }
+      else if (a === 'music') { this.music = !this.music; try { localStorage.setItem(MUSKEY, this.music ? 'on' : 'off'); } catch (e) {} if (this.music) this.startMusic(); else this.stopMusic(); this.renderModal(); }
       else if (a === 'labels') { this.labels = !this.labels; this.renderModal(); }
       else if (a === 'replay') { this.endShown = false; this.modal = null; this.newMission(this.sim && this.sim.scenario); this.showBrief = true; this.setMode('explore'); }
       else if (a === 'ask') { const n = S.requestAdvice(this.sim); if (n !== this.sim) { this.commit(n); if (n.advice.status === 'transit') setTimeout(() => { this.commit(S.receiveAdvice(this.sim)); this.renderEvent(); }, S.COMMS.moon.roundTripSec * 1000); this.renderEvent(); } }
     }
-    togglePause() { this.paused = !this.paused; this._userPaused = this.paused; this.modal = this.paused ? 'pause' : null; this.renderModal(); this.renderHud(); }
+    togglePause() { this.paused = !this.paused; this._userPaused = this.paused; this.modal = this.paused ? 'pause' : null; this.setMusicVolume(this.paused ? MUSIC_DUCK : MUSIC_VOL); this.renderModal(); this.renderHud(); }
     toggleCineHud() { this.cinematicHud = !this.cinematicHud; this.renderHud(); }
 
     renderHud() {
       if (!this.hud) return; const s = this.sim, S = this.S, hide = this.introOn || this.cinematicHud, narrow = (this.clientWidth || 1200) < 1100;
       if (narrow && !this._narrowInit) { this._narrowInit = true; this.panelsOpen.left = false; }
       const top = this.$('[data-top]'), left = this.$('[data-left]'), right = this.$('[data-right]'), bot = this.$('[data-bottom]');
+      this.renderEarthCard();
       const phase = !s ? '—' : s.status === 'complete' ? 'Mission complete' : s.status === 'failed' ? 'Mission ended' : s.pendingEvent ? 'Emergency' : S.forecast(s).some(f => f.kind === 'storm') ? 'Storm watch' : 'Normal operations';
       const pcol = !s ? C.mut : s.pendingEvent || s.status === 'failed' ? C.crit : phase === 'Storm watch' ? C.warn : C.ok;
       top.innerHTML = this.introOn ? '' : `<div style="position:absolute;left:12px;right:12px;top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;${this.glass('padding:8px 12px')}">
-        <span style="display:flex;align-items:center;gap:9px"><lq-emblem size="26"></lq-emblem><b style="font-size:16px">LunaQuest</b></span>
+        <a href="/" title="Back to the LunaQuest home page" style="display:flex;align-items:center;gap:9px;text-decoration:none;color:inherit;pointer-events:auto;border-radius:8px;padding:2px 4px"><lq-emblem size="26"></lq-emblem><b style="font-size:16px">LunaQuest</b></a>
         <span style="width:1px;height:22px;background:#243247"></span>
         ${narrow || !s ? '' : '<span style="font-size:14px;color:#C4CEDD">' + s.mission + '</span>'}
         ${s ? `<span style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">Day ${pad(s.day)} <span style="color:${C.mut};font-weight:400">/ ${S.daysOf(s)}</span><span style="width:70px;height:5px;border-radius:3px;background:#172235;overflow:hidden"><span style="display:block;height:100%;width:${s.day / S.daysOf(s) * 100}%;background:${C.cyan}"></span></span></span>` : ''}
@@ -750,6 +1030,7 @@
         <button data-act="pause" title="Pause (Esc)" style="${this.btn()}"><lq-icon name="${this.paused ? 'play' : 'pause'}" size="15"></lq-icon></button>
         <button data-act="settings" title="Settings" style="${this.btn()}"><lq-icon name="settings" size="15"></lq-icon></button>
         <a href="/mission" style="${this.btn()};text-decoration:none" title="Same mission as a 2D dashboard"><lq-icon name="dashboard" size="15"></lq-icon>${narrow ? '' : '<span>2D view</span>'}</a>
+        <a href="/" style="${this.btn()};text-decoration:none" title="Leave the mission and go to the home page"><lq-icon name="home" size="15"></lq-icon>${narrow ? '' : '<span>Home</span>'}</a>
       </div>`;
       if (hide) { top.style.display = this.cinematicHud && !this.introOn ? 'none' : ''; left.innerHTML = right.innerHTML = bot.innerHTML = ''; if (this.cinematicHud && !this.introOn) bot.innerHTML = `<button data-act="cineHud" style="${this.btn()};position:absolute;right:14px;bottom:14px">Show interface (H)</button>`; this.renderEvent(); return; }
       top.style.display = '';
@@ -796,7 +1077,7 @@
       const blocked = s.status !== 'active' || !!s.pendingEvent || !!this.sequence || this.paused;
       const hint = this.paused ? 'Paused. Press Esc to resume.' : s.pendingEvent ? 'Emergency! Choose a response in the panel.' : this.sequence ? 'The crew is carrying out your decision…' : s.status !== 'active' ? 'Mission over — see your debrief.' : 'Drag to look around · scroll to zoom · click a facility or astronaut · Space = next day';
       bot.innerHTML = `<div style="position:absolute;left:12px;right:12px;bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;${this.glass('padding:8px 10px')}">
-        <div role="group" aria-label="Camera" style="display:flex;gap:4px">${[['explore', 'layers', 'Explore'], ['top', 'dashboard', 'Top-down'], ['follow', 'users', 'Follow'], ['exterior', 'mountain', 'Outside']].map(([m, ic, l]) => `<button data-act="mode" data-mode="${m}" aria-pressed="${this.camMode === m}" style="${this.btn(false, this.camMode === m ? `border-color:${C.cyan};color:${C.cyan}` : '')}"><lq-icon name="${ic}" size="15"></lq-icon>${narrow ? '' : `<span>${l}</span>`}</button>`).join('')}
+        <div role="group" aria-label="Camera" style="display:flex;gap:4px">${[['explore', 'layers', 'Explore'], ['top', 'dashboard', 'Top-down'], ['follow', 'users', 'Follow'], ['exterior', 'mountain', 'Outside'], ['earth', 'globe', 'Earth view']].map(([m, ic, l]) => `<button data-act="mode" data-mode="${m}" aria-pressed="${this.camMode === m}" style="${this.btn(false, this.camMode === m ? `border-color:${C.cyan};color:${C.cyan}` : '')}"><lq-icon name="${ic}" size="15"></lq-icon>${narrow ? '' : `<span>${l}</span>`}</button>`).join('')}
           ${this.camMode === 'cine' ? `<button data-act="skipCine" style="${this.btn(false, `border-color:${C.warn};color:${C.warn}`)}">Skip camera</button>` : ''}</div>
         <span style="flex:1;min-width:160px;font-size:13px;color:#C4CEDD">${narrow && !s.pendingEvent && !this.sequence && !this.paused && s.status === 'active' ? 'Click things to inspect · Space = next day' : hint}</span>
         <button data-act="auto" aria-pressed="${!!this.auto}" title="Advance days automatically" ${s.status !== 'active' ? 'disabled' : ''} style="${this.btn(false, this.auto ? `border-color:${C.cyan};color:${C.cyan}` : '')}"><lq-icon name="${this.auto ? 'pause' : 'play'}" size="15"></lq-icon>${narrow ? '' : (this.auto ? 'Auto on' : 'Auto')}</button>
@@ -845,9 +1126,56 @@
         </div></div>`;
     }
 
+    /** Bottom-left card, Earth view only. Reads the mission for the day and phase; the
+     *  Next day button goes through the same engine path as the main one. */
+    renderEarthCard() {
+      const box = this.$('[data-earth]'); if (!box) return;
+      if (this.camMode !== 'earth' || this.introOn || this.cinematicHud) { box.innerHTML = ''; return; }
+      const S = this.S, s = this.sim, info = this.earthInfo();
+      const days = s ? S.daysOf(s) : 30, day = s ? s.day : 1;
+      const blocked = !s || s.status !== 'active' || !!s.pendingEvent || !!this.sequence;
+      const why = [
+        'About 384,400 km away. Radio signals take about 1.3 seconds each way' + (s && s.comms === 'mars' ? ', though your Mars drill pretends they take minutes' : '') + '.',
+        'From most of the Moon’s near side, Earth hangs in almost the same spot in the sky because the Moon always keeps the same face toward Earth. Near the poles, like this base, Earth sits low and wobbles.',
+        'Earth has phases too, the opposite of the Moon’s. When people on Earth see a new Moon, astronauts see a full Earth.',
+        'Earth looks about 3.7 times wider than the full Moon looks from Earth.',
+      ];
+      let strip = '';
+      for (let d = 1; d <= days; d++) {
+        const a = ((.55 + Math.PI * 2 * (d - 1) / 29.53) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+        const on = d === day;
+        strip += '<span title="Day ' + d + '" style="flex:none;opacity:' + (on ? 1 : .4) + ';' + (on ? 'outline:1.5px solid ' + C.cyan + ';outline-offset:2px;border-radius:50%' : '') + '">'
+          + this.phaseSvg((1 - Math.cos(a)) / 2, a < Math.PI, 12) + '</span>';
+      }
+      box.innerHTML = '<div style="position:absolute;left:12px;bottom:86px;width:min(420px,calc(100% - 32px));max-height:calc(100% - 180px);overflow-y:auto;overflow-x:hidden;box-sizing:border-box;scrollbar-gutter:stable;' + this.glass('padding:14px') + '">'
+        + '<div style="display:flex;align-items:center;gap:11px">'
+        + '<span style="flex:none">' + this.phaseSvg(info.k, info.waxing, 44) + '</span>'
+        + '<span style="flex:1;min-width:0">'
+        + '<span style="display:block;font:600 11px \'Geist Mono\',monospace;letter-spacing:.14em;color:' + C.cyan + '">EARTH FROM THE MOON · DAY ' + pad(day) + '</span>'
+        + '<b style="display:block;margin-top:4px;font-size:16px">' + info.name + '</b>'
+        + '<span style="display:block;font-size:12.5px;color:' + C.mut + '">' + info.pct + '% of Earth’s face is in sunlight</span>'
+        + '</span>'
+        + '<button data-act="backbase" aria-label="Back to base" style="' + this.btn() + '"><lq-icon name="home" size="15"></lq-icon></button>'
+        + '</div>'
+        + '<div style="margin-top:12px;display:flex;gap:3px;overflow-x:auto;padding-bottom:2px">' + strip + '</div>'
+        + '<div style="display:flex;justify-content:space-between;font:500 10px \'Geist Mono\',monospace;letter-spacing:.1em;color:' + C.mut + ';margin-top:4px"><span>DAY 1</span><span>DAY ' + days + '</span></div>'
+        + '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'
+        + '<button data-act="advance" ' + (blocked ? 'disabled' : '') + ' style="' + this.btn(true, blocked ? 'opacity:.5;cursor:not-allowed' : '') + '"><lq-icon name="play" size="15"></lq-icon>Next day</button>'
+        + '<button data-act="backbase" style="' + this.btn() + '"><lq-icon name="home" size="15"></lq-icon>Back to base</button>'
+        + '</div>'
+        + '<button data-act="earthwhy" aria-expanded="' + (this.earthWhy ? 'true' : 'false') + '" style="' + this.btn(false, 'width:100%;margin-top:10px;justify-content:space-between') + '"><span>Why does Earth look like this?</span><lq-icon name="' + (this.earthWhy ? 'chevron-up' : 'chevron-down') + '" size="14"></lq-icon></button>'
+        + (this.earthWhy ? '<ul style="margin:10px 0 0;padding-left:17px;display:flex;flex-direction:column;gap:7px;font-size:12.5px;line-height:1.5;color:#C4CEDD">' + why.map(w => '<li>' + w + '</li>').join('') + '</ul>' : '')
+        + '<p style="margin:10px 0 0;font-size:11.5px;line-height:1.45;color:' + C.mut + '">The zoom lens makes Earth look bigger than it would to your eyes.</p>'
+        + '</div>';
+    }
+
     renderPanel() {
       const box = this.$('[data-panel]'), s = this.sim, S = this.S, p = this.panel;
-      if (!p || !s || this.introOn || this.cinematicHud) { box.innerHTML = ''; return; }
+      if (!p || !s || this.introOn || this.cinematicHud) { if (this._panelHtml !== '') { this._panelHtml = ''; box.innerHTML = ''; } return; }
+      /* The crew panel is re-rendered twice a second by renderCrewTasks(), so skip the DOM
+         swap when the markup is identical, and place the popover in the same tick it is
+         written — it starts at opacity 0, and waiting a frame to reveal it reads as a flash. */
+      const set = html => { if (this._panelHtml === html) return; this._panelHtml = html; box.innerHTML = html; this.positionPanel(); };
       const wrap = (title, sub, icon, color, body) => `<div style="position:absolute;left:0;top:0;width:min(300px,86vw);z-index:6;opacity:0;will-change:transform;pointer-events:auto">
         <span data-caret style="position:absolute;width:12px;height:12px;transform:rotate(45deg);border-radius:2px;background:#0A1120;border:1px solid #2E4560"></span>
         <div style="position:relative;max-height:min(56vh,430px);overflow-y:auto;overflow-x:hidden;box-sizing:border-box;scrollbar-gutter:stable;box-shadow:0 18px 44px rgba(0,0,0,.55);${this.glass('padding:14px;border-color:#2E4560')}">
@@ -855,8 +1183,8 @@
       const dl = rows => `<dl style="margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px">${rows.map(([k, v, c]) => `<dt style="color:${C.mut}">${k}</dt><dd style="margin:0;text-align:right;color:${c || C.ink}">${v}</dd>`).join('')}</dl>`;
       if (p.kind === 'crew') {
         const c = this.crew.find(x => x.id === p.id), loc = ROOMS[c.path.length ? c.targetRoom : c.room];
-        box.innerHTML = wrap(c.name, c.role, 'users', c.color, dl([['Current task', c.task], ['Location', (c.path.length ? 'Walking to ' : '') + (loc ? loc.name : '—')], ['Status', c.sheltered ? 'In the radiation shelter' : c.busy ? 'Busy' : c.path.length ? 'Moving' : 'Available', c.busy ? C.warn : C.ok], ['Crew health', `${Math.round(s.health)} / 100`]]) +
-          `<div style="display:flex;gap:8px;margin-top:12px"><button data-act="follow" data-id="${c.id}" style="${this.btn(true)}"><lq-icon name="eye" size="15"></lq-icon>Follow with camera</button></div><p style="margin:10px 0 0;font-size:12px;color:${C.mut}">Crew act on your decisions. During an emergency you choose who to send.</p>`);
+        set(wrap(c.name, c.role, 'users', c.color, dl([['Current task', c.task], ['Location', (c.path.length ? 'Walking to ' : '') + (loc ? loc.name : '—')], ['Status', c.sheltered ? 'In the radiation shelter' : c.busy ? 'Busy' : c.path.length ? 'Moving' : 'Available', c.busy ? C.warn : C.ok], ['Crew health', `${Math.round(s.health)} / 100`]]) +
+          `<div style="display:flex;gap:8px;margin-top:12px"><button data-act="follow" data-id="${c.id}" style="${this.btn(true)}"><lq-icon name="eye" size="15"></lq-icon>Follow with camera</button></div><p style="margin:10px 0 0;font-size:12px;color:${C.mut}">Crew act on your decisions. During an emergency you choose who to send.</p>`));
         return;
       }
       const f = FACILITIES[p.id], R = S.resources(s), rt = S.rates(s), pw = S.powerOf(s), eq = f.eq && S.EQUIPMENT.find(e => e.id === f.eq), lvl = eq ? s.levels[eq.id] : null;
@@ -878,7 +1206,7 @@
       const up = eq ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid #172235;display:flex;flex-direction:column;gap:8px"><div style="font-size:13px"><span style="color:${C.mut}">Level</span> <b>${lvl} / ${eq.max}</b>${lvl ? ` · ${eq.effect(lvl)}` : ''}</div>
         ${nc != null ? `<button data-act="upgrade" data-eq="${eq.id}" ${s.credits < nc || s.status !== 'active' ? 'disabled' : ''} style="${this.btn(s.credits >= nc, s.credits < nc ? 'opacity:.5;cursor:not-allowed' : '')}"><lq-icon name="wrench" size="15"></lq-icon>Upgrade to level ${lvl + 1} · ${nc} credits</button><span style="font-size:12px;color:${C.mut}">Next: ${eq.effect(lvl + 1)}. ${eq.tradeoff}</span>` : `<span style="font-size:12px;color:${C.mut}">Fully upgraded.</span>`}</div>` : '';
       const sw = f.sw && (f.sw === 'research' || s.levels[f.sw] > 0) ? `<button data-act="switch" data-sw="${f.sw}" ${s.status !== 'active' || s.pendingEvent ? 'disabled' : ''} style="${this.btn(false)};margin-top:10px"><lq-icon name="zap" size="15"></lq-icon>${pw[f.sw] ? 'Switch off to save power' : 'Switch back on'}</button>` : '';
-      box.innerHTML = wrap(f.name, `${status[0]} · ${(ROOMS[f.room] || { name: 'Lunar surface' }).name}`, f.icon, status[1], dl(rows) + sw + up + `<button data-act="goto" data-id="${p.id}" style="${this.btn()};margin-top:10px">Show me</button>`);
+      set(wrap(f.name, `${status[0]} · ${(ROOMS[f.room] || { name: 'Lunar surface' }).name}`, f.icon, status[1], dl(rows) + sw + up + `<button data-act="goto" data-id="${p.id}" style="${this.btn()};margin-top:10px">Show me</button>`));
     }
 
     renderEnd() {
@@ -923,6 +1251,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">Communication delay<span style="display:flex;gap:6px"><button data-act="comms" data-v="moon" style="${this.btn(!this.sim || this.sim.comms !== 'mars')}">Moon · 1.3 s</button><button data-act="comms" data-v="mars" style="${this.btn(!!this.sim && this.sim.comms === 'mars')}">Mars drill</button></span></div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">Auto speed<span style="display:flex;gap:6px">${[['4', 'Slow'], ['2.5', 'Normal'], ['1.2', 'Fast']].map(([v, l]) => `<button data-act="speed" data-v="${v}" style="${this.btn(String(this.autoSpeed) === v)}">${l}</button>`).join('')}</span></div>
         <div style="display:flex;justify-content:space-between;align-items:center">Sound effects<button data-act="sound" style="${this.btn(this.sound)}">${this.sound ? 'On' : 'Off'}</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center">Background music<button data-act="music" style="${this.btn(this.music)}">${this.music ? 'On' : 'Off'}</button></div>
         <div style="display:flex;justify-content:space-between;align-items:center">Astronaut name tags<button data-act="labels" style="${this.btn(this.labels)}">${this.labels ? 'On' : 'Off'}</button></div>
         <p style="margin:0;font-size:12.5px;color:${C.mut}">Low quality turns off shadows and uses fewer water particles — best for older laptops. Motion is reduced automatically if your device asks for it.</p></div>
         <div style="margin-top:16px"><button data-act="closeModal" style="${this.btn(true)}">Done</button></div>`);
@@ -937,6 +1266,53 @@
     }
 
     /* ---------------- sound (synthesised, off by default) ---------------- */
+    /* ---------------- background music ---------------- */
+    /** Loops the track from /public. Browsers refuse audio before a user gesture, so this
+     *  runs when the intro is dismissed, and a refused play() is swallowed rather than thrown. */
+    startMusic() {
+      if (!this.music || this._mus || this._dead) return;
+      const a = new Audio(MUSIC_SRC);
+      a.loop = true; a.preload = 'auto'; a.volume = 0;
+      a.addEventListener('error', () => { this._musErr = true; });
+      this._mus = a;
+      const pr = a.play();
+      if (pr && pr.catch) pr.catch(() => {});
+      this.fadeMusic(this.paused ? MUSIC_DUCK : MUSIC_VOL, 2500);
+      if (!this._vis) {
+        this._vis = () => {
+          const m = this._mus; if (!m) return;
+          if (document.hidden) m.pause();
+          else { const q = m.play(); if (q && q.catch) q.catch(() => {}); }
+        };
+        document.addEventListener('visibilitychange', this._vis);
+      }
+    }
+    /** An <audio> element has no scheduled ramps, so step the volume by hand. */
+    fadeMusic(to, ms) {
+      const m = this._mus; if (!m) return;
+      clearInterval(this._musFade);
+      const from = m.volume, t0 = performance.now();
+      this._musFade = setInterval(() => {
+        const cur = this._mus;
+        if (!cur) { clearInterval(this._musFade); return; }
+        const k = ms <= 0 ? 1 : clamp((performance.now() - t0) / ms, 0, 1);
+        cur.volume = clamp(from + (to - from) * k, 0, 1);
+        if (k >= 1) clearInterval(this._musFade);
+      }, 50);
+    }
+    setMusicVolume(v) { this.fadeMusic(v, 600); }
+    stopMusic(fade = 1200) {
+      const m = this._mus; if (!m) return;
+      this._mus = null; clearInterval(this._musFade);
+      const from = m.volume, t0 = performance.now();
+      const kill = () => { try { m.pause(); m.removeAttribute('src'); m.load(); } catch (e) {} };
+      if (fade <= 0) return kill();
+      const iv = setInterval(() => {
+        const k = clamp((performance.now() - t0) / fade, 0, 1);
+        m.volume = clamp(from * (1 - k), 0, 1);
+        if (k >= 1) { clearInterval(iv); kill(); }
+      }, 50);
+    }
     beep(kind) {
       if (!this.sound) return; const A = this.ac || (this.ac = new (window.AudioContext || window.webkitAudioContext)()), now = A.currentTime;
       const tone = (f, t0, d, type = 'sine', v = .08) => { const o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(v, now + t0); g.gain.exponentialRampToValueAtTime(.0001, now + t0 + d); o.connect(g).connect(A.destination); o.start(now + t0); o.stop(now + t0 + d + .02); };
